@@ -383,6 +383,8 @@ export class Shmup {
     boss: loadImage(bossUrl),
   };
 
+  private beigeMasks = new WeakMap<HTMLImageElement, HTMLCanvasElement>();
+
   private lastSig = "";
   private onHud: (h: Hud) => void;
 
@@ -1837,13 +1839,43 @@ export class Shmup {
     return { img: this.imgs.turret, h: 172 };
   }
 
+  private beigeMask(img: HTMLImageElement) {
+    const cached = this.beigeMasks.get(img);
+    if (cached) return cached;
+    const mask = document.createElement("canvas");
+    mask.width = img.naturalWidth;
+    mask.height = img.naturalHeight;
+    const g = mask.getContext("2d");
+    if (!g) return null;
+    g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = "#f6f1e6";
+    g.fillRect(0, 0, mask.width, mask.height);
+    this.beigeMasks.set(img, mask);
+    return mask;
+  }
+
   private blit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, height: number, rot: number) {
     if (!img.complete || !img.naturalWidth) return;
     const w = height * (img.naturalWidth / img.naturalHeight);
+    const left = -w / 2;
+    const top = -height / 2;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
-    ctx.drawImage(img, -w / 2, -height / 2, w, height);
+    const mask = this.beigeMask(img);
+    if (mask) {
+      const smooth = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false;
+      for (const ox of [-1, 0, 1]) {
+        for (const oy of [-1, 0, 1]) {
+          if (ox === 0 && oy === 0) continue;
+          ctx.drawImage(mask, left + ox, top + oy, w, height);
+        }
+      }
+      ctx.imageSmoothingEnabled = smooth;
+    }
+    ctx.drawImage(img, left, top, w, height);
     ctx.restore();
   }
 }
