@@ -384,6 +384,8 @@ export class Shmup {
     boss: loadImage(bossUrl),
   };
 
+  private bgTiles: HTMLCanvasElement[] = [];
+
   private lastSig = "";
   private onHud: (h: Hud) => void;
 
@@ -1381,309 +1383,101 @@ export class Shmup {
   private drawBackdrop(ctx: CanvasRenderingContext2D) {
     const st = STAGES[this.stage];
     const hue = st.hue;
-    const form = st.form;
     const t = this.scroll;
-    const calm = this.reduceMotion;
 
     const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, `hsl(${hue} 48% 14%)`);
-    sky.addColorStop(0.45, `hsl(${hue + 12} 44% 8%)`);
-    sky.addColorStop(1, `hsl(${(hue + 28) % 360} 52% 3%)`);
+    sky.addColorStop(0, `hsl(${hue} 42% 12%)`);
+    sky.addColorStop(1, `hsl(${(hue + 24) % 360} 36% 4%)`);
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, H);
 
-    const bloom = ctx.createRadialGradient(W * 0.5, H * 0.18, 20, W * 0.5, H * 0.22, H * 0.55);
-    bloom.addColorStop(0, `hsla(${hue + 20}, 70%, 55%, 0.16)`);
-    bloom.addColorStop(0.55, `hsla(${hue}, 55%, 35%, 0.06)`);
-    bloom.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = bloom;
-    ctx.fillRect(0, 0, W, H);
-
-    // Far starfield / dust
-    for (let i = 0; i < 64; i++) {
-      const depth = 0.18 + (i % 5) * 0.14;
-      const y = ((i * 97 + t * (12 + depth * 28)) % (H + 40)) - 20;
-      const x = (i * 131 + (i % 7) * 17) % W;
-      const size = i % 11 === 0 ? 2.4 : i % 5 === 0 ? 1.6 : 1.1;
-      ctx.globalAlpha = 0.18 + (i % 4) * 0.1;
-      ctx.fillStyle = i % 3 === 0 ? "#3ee0ff" : i % 3 === 1 ? "#f6f1e6" : `hsl(${hue + 40} 70% 70%)`;
-      ctx.fillRect(x, y, size, size);
-    }
-    ctx.globalAlpha = 1;
-
-    if (form === 0) this.drawDesertBg(ctx, t, hue, calm);
-    else if (form === 1) this.drawCableBg(ctx, t, hue, calm);
-    else if (form === 2) this.drawCityBg(ctx, t, hue, calm);
-    else if (form === 3) this.drawIceBg(ctx, t, hue, calm);
-    else if (form === 4) this.drawCloudBg(ctx, t, hue, calm);
-    else this.drawChaosBg(ctx, t, hue, calm);
-
-    ctx.globalAlpha = 0.035;
-    ctx.fillStyle = "#f6f1e6";
-    for (let i = 0; i < 3; i++) {
-      const y = (t * 1.6 + i * 340) % (H + 80) - 20;
-      ctx.fillRect(0, y, W, 6);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawDesertBg(ctx: CanvasRenderingContext2D, t: number, hue: number, calm: boolean) {
-    // Rolling dunes
-    for (let layer = 0; layer < 3; layer++) {
-      const speed = 0.55 + layer * 0.85;
-      const amp = 18 + layer * 22;
-      const base = H * (0.42 + layer * 0.18);
-      ctx.beginPath();
-      ctx.moveTo(0, H);
-      for (let x = 0; x <= W; x += 18) {
-        const y = base + Math.sin(x * 0.018 + t * 0.012 * speed + layer) * amp + Math.sin(x * 0.05 + layer * 2) * (8 + layer * 4);
-        ctx.lineTo(x, y);
-      }
-      ctx.lineTo(W, H);
-      ctx.closePath();
-      ctx.fillStyle = `hsla(${hue + layer * 8}, ${38 + layer * 8}%, ${12 + layer * 5}%, ${0.55 - layer * 0.1})`;
-      ctx.fill();
-    }
-
-    // Data monoliths
-    for (let i = 0; i < 10; i++) {
-      const lane = (i * 73 + 40) % (W - 40);
-      const h = 70 + (i % 5) * 28;
-      const y = ((i * 190 + t * (1.1 + (i % 3) * 0.35)) % (H + h + 80)) - h;
-      ctx.fillStyle = `hsla(${hue + 10}, 30%, ${16 + (i % 3) * 4}%, 0.7)`;
-      ctx.fillRect(lane, y, 14 + (i % 3) * 6, h);
-      ctx.fillStyle = `hsla(${hue + 40}, 70%, 55%, 0.35)`;
-      ctx.fillRect(lane + 3, y + 8, 3, h * 0.35);
-      if (!calm && i % 2 === 0) {
-        ctx.globalAlpha = 0.25 + Math.sin(t * 0.08 + i) * 0.1;
-        ctx.fillStyle = "#3ee0ff";
-        ctx.fillRect(lane + 8, y + 12, 2, 10 + (i % 4) * 4);
-        ctx.globalAlpha = 1;
+    const tile = this.backdropTile(st.form, hue);
+    const offset = Math.floor(t) % tile.height;
+    for (let y = -tile.height; y < H; y += tile.height) {
+      for (let x = 0; x < W; x += tile.width) {
+        ctx.drawImage(tile, x, y + offset);
       }
     }
-
-    // Dust motes
-    ctx.fillStyle = `hsla(${hue + 20}, 60%, 65%, 0.35)`;
-    for (let i = 0; i < 28; i++) {
-      const x = (i * 89 + t * (0.4 + (i % 4) * 0.2) * (calm ? 0.3 : 1)) % W;
-      const y = (i * 67 + t * (1.6 + (i % 3) * 0.5)) % H;
-      ctx.globalAlpha = 0.15 + (i % 5) * 0.05;
-      ctx.beginPath();
-      ctx.arc(x, y, 1.2 + (i % 3) * 0.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
   }
 
-  private drawCableBg(ctx: CanvasRenderingContext2D, t: number, hue: number, calm: boolean) {
-    // Light shafts from surface
-    for (let i = 0; i < 5; i++) {
-      const x = 40 + i * 110 + Math.sin(t * 0.02 + i) * (calm ? 0 : 18);
-      const g = ctx.createLinearGradient(x, 0, x + 40, H);
-      g.addColorStop(0, `hsla(${hue + 30}, 80%, 70%, 0.14)`);
-      g.addColorStop(0.5, `hsla(${hue}, 60%, 40%, 0.04)`);
-      g.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + 70, 0);
-      ctx.lineTo(x + 30, H);
-      ctx.lineTo(x - 40, H);
-      ctx.closePath();
-      ctx.fill();
+  private backdropTile(form: number, hue: number) {
+    const cached = this.bgTiles[form];
+    if (cached) return cached;
+    const S = 128;
+    const blur = Math.round(S * 0.2);
+    const sharp = document.createElement("canvas");
+    sharp.width = S;
+    sharp.height = S;
+    const g = sharp.getContext("2d");
+    if (!g) return sharp;
+    g.fillStyle = `hsl(${hue} 28% 9%)`;
+    g.fillRect(0, 0, S, S);
+    this.paintTile(g, form, hue, S);
+
+    const sheet = document.createElement("canvas");
+    sheet.width = S * 3;
+    sheet.height = S * 3;
+    const sg = sheet.getContext("2d");
+    if (!sg) return sharp;
+    for (let y = 0; y < 3; y++) {
+      for (let x = 0; x < 3; x++) sg.drawImage(sharp, x * S, y * S);
     }
 
-    // Thick undersea cables
-    for (let i = 0; i < 4; i++) {
-      const baseX = 60 + i * 130;
-      ctx.strokeStyle = `hsla(${hue - 10}, 35%, ${22 + i * 4}%, 0.85)`;
-      ctx.lineWidth = 10 + (i % 2) * 4;
-      ctx.beginPath();
-      for (let y = -40; y <= H + 40; y += 24) {
-        const x = baseX + Math.sin((y + t * (1.2 + i * 0.3)) * 0.012 + i) * (36 + i * 8);
-        if (y === -40) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+    const out = document.createElement("canvas");
+    out.width = S;
+    out.height = S;
+    const og = out.getContext("2d");
+    if (!og) return sharp;
+    og.filter = `blur(${blur}px)`;
+    og.drawImage(sheet, -S, -S);
+    this.bgTiles[form] = out;
+    return out;
+  }
+
+  private paintTile(g: CanvasRenderingContext2D, form: number, hue: number, S: number) {
+    if (form === 0) {
+      for (let i = 0; i < 4; i++) {
+        g.fillStyle = `hsl(${hue + i * 8} ${30 + i * 8}% ${16 + i * 5}%)`;
+        g.fillRect(0, i * 32, S, 32);
       }
-      ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue + 40}, 80%, 60%, 0.25)`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    // Bubbles
-    for (let i = 0; i < 22; i++) {
-      const x = (i * 97 + Math.sin(t * 0.03 + i) * 20) % W;
-      const y = H - ((i * 73 + t * (1.8 + (i % 4) * 0.6)) % (H + 40));
-      const r = 2 + (i % 5);
-      ctx.globalAlpha = 0.18 + (i % 4) * 0.06;
-      ctx.strokeStyle = `hsla(${hue + 20}, 70%, 75%, 0.8)`;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawCityBg(ctx: CanvasRenderingContext2D, t: number, hue: number, calm: boolean) {
-    // Perspective neon grid floor fading upward as "far city"
-    ctx.save();
-    ctx.globalAlpha = 0.22;
-    ctx.strokeStyle = `hsl(${hue + 20} 80% 65%)`;
-    ctx.lineWidth = 1;
-    const vanishing = H * 0.28;
-    for (let i = 0; i < 12; i++) {
-      const y = vanishing + ((i * 70 + t * 2.2) % (H - vanishing + 40));
-      const fade = clamp(1 - (y - vanishing) / (H - vanishing), 0, 1);
-      ctx.globalAlpha = 0.06 + fade * 0.18;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
-      ctx.stroke();
-    }
-    for (let i = -6; i <= 6; i++) {
-      ctx.globalAlpha = 0.12;
-      ctx.beginPath();
-      ctx.moveTo(W / 2 + i * 8, vanishing);
-      ctx.lineTo(W / 2 + i * 90, H);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // Building silhouettes scrolling
-    for (let i = 0; i < 14; i++) {
-      const w = 28 + (i % 5) * 14;
-      const h = 90 + (i % 7) * 38;
-      const x = (i * 61) % (W + 40) - 20;
-      const y = ((i * 170 + t * (1.3 + (i % 3) * 0.4)) % (H + h + 60)) - h;
-      ctx.fillStyle = `hsla(${hue}, 40%, ${8 + (i % 3) * 3}%, 0.82)`;
-      ctx.fillRect(x, y, w, h);
-      // windows
-      ctx.fillStyle = `hsla(${hue + 40}, 90%, 70%, ${calm ? 0.25 : 0.2 + Math.sin(t * 0.1 + i) * 0.08})`;
-      for (let wy = y + 10; wy < y + h - 8; wy += 14) {
-        for (let wx = x + 5; wx < x + w - 6; wx += 10) {
-          if ((wx + wy + i) % 3 === 0) continue;
-          ctx.fillRect(wx, wy, 4, 5);
-        }
+      g.fillStyle = `hsl(${hue + 18} 22% 28%)`;
+      g.fillRect(24, 0, 12, S);
+      g.fillRect(86, 0, 16, S);
+    } else if (form === 1) {
+      g.fillStyle = `hsl(${hue} 40% 18%)`;
+      g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 3; i++) {
+        g.fillStyle = `hsl(${hue + 16} 35% ${22 + i * 6}%)`;
+        g.fillRect(18 + i * 36, 0, 10, S);
       }
-      ctx.fillStyle = `hsla(${hue + 30}, 80%, 60%, 0.45)`;
-      ctx.fillRect(x, y, w, 2);
+    } else if (form === 2) {
+      for (let i = 0; i < 4; i++) {
+        g.fillStyle = `hsl(${hue} 32% ${10 + (i % 2) * 6}%)`;
+        g.fillRect(i * 32, 0, 26, S);
+        g.fillStyle = `hsl(${hue + 36} 70% 62%)`;
+        g.fillRect(i * 32 + 8, 20, 6, 8);
+        g.fillRect(i * 32 + 8, 70, 6, 8);
+      }
+    } else if (form === 3) {
+      g.fillStyle = `hsl(${hue} 30% 16%)`;
+      g.fillRect(0, 0, S, S);
+      g.fillStyle = `hsl(${hue + 12} 25% 70%)`;
+      for (let i = 0; i < 4; i++) g.fillRect(i * 28, i * 16, 18, S);
+    } else if (form === 4) {
+      g.fillStyle = `hsl(${hue + 8} 28% 22%)`;
+      g.fillRect(0, 0, S, S);
+      g.fillStyle = `hsl(${hue + 10} 20% 78%)`;
+      g.fillRect(8, 36, 70, 28);
+      g.fillRect(48, 70, 64, 24);
+    } else {
+      g.fillStyle = `hsl(${hue} 40% 12%)`;
+      g.fillRect(0, 0, S, S);
+      g.fillStyle = `hsl(${hue + 30} 55% 42%)`;
+      g.fillRect(46, 0, 8, S);
+      g.fillRect(0, 46, S, 8);
+      g.fillStyle = `hsl(${hue + 40} 80% 70%)`;
+      g.fillRect(54, 54, 20, 20);
     }
-  }
-
-  private drawIceBg(ctx: CanvasRenderingContext2D, t: number, hue: number, calm: boolean) {
-    // Distant planet body
-    ctx.beginPath();
-    ctx.arc(W * 0.78, H * 0.16, 90, 0, Math.PI * 2);
-    const planet = ctx.createRadialGradient(W * 0.78, H * 0.16, 10, W * 0.78, H * 0.16, 90);
-    planet.addColorStop(0, `hsla(${hue + 20}, 50%, 55%, 0.35)`);
-    planet.addColorStop(0.7, `hsla(${hue}, 40%, 25%, 0.18)`);
-    planet.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = planet;
-    ctx.fill();
-
-    // Ice shards / crystals
-    for (let i = 0; i < 12; i++) {
-      const x = (i * 79 + 30) % W;
-      const h = 50 + (i % 4) * 36;
-      const y = ((i * 155 + t * (0.9 + (i % 3) * 0.35)) % (H + h + 50)) - h;
-      const lean = (i % 2 ? 1 : -1) * (10 + (i % 3) * 6);
-      ctx.fillStyle = `hsla(${hue}, 45%, ${55 + (i % 3) * 8}%, 0.22)`;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + 12 + lean, y + h * 0.45);
-      ctx.lineTo(x + 4, y + h);
-      ctx.lineTo(x - 10, y + h * 0.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 30}, 70%, 80%, 0.35)`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // Frost sparkles
-    for (let i = 0; i < 30; i++) {
-      const x = (i * 53 + t * (calm ? 0.2 : 0.6)) % W;
-      const y = (i * 71 + t * 1.5) % H;
-      ctx.globalAlpha = 0.2 + (i % 4) * 0.08;
-      ctx.fillStyle = "#d9f4ff";
-      ctx.fillRect(x, y, i % 7 === 0 ? 2.5 : 1.2, i % 7 === 0 ? 2.5 : 1.2);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawCloudBg(ctx: CanvasRenderingContext2D, t: number, hue: number, calm: boolean) {
-    for (let i = 0; i < 10; i++) {
-      const layer = i % 3;
-      const x = ((i * 97 + t * (0.35 + layer * 0.25) * (calm ? 0.4 : 1)) % (W + 160)) - 80;
-      const y = 80 + ((i * 140 + t * (0.7 + layer * 0.4)) % (H + 100)) - 40;
-      const scale = 0.7 + layer * 0.35;
-      ctx.globalAlpha = 0.12 + layer * 0.08;
-      ctx.fillStyle = `hsl(${hue + 10} 40% ${55 + layer * 10}%)`;
-      this.blob(ctx, x, y, 70 * scale, 28 * scale);
-      this.blob(ctx, x + 38 * scale, y - 8 * scale, 50 * scale, 22 * scale);
-      this.blob(ctx, x - 30 * scale, y + 6 * scale, 44 * scale, 18 * scale);
-    }
-    ctx.globalAlpha = 1;
-
-    // Floating platforms / canopy islands
-    for (let i = 0; i < 6; i++) {
-      const x = 50 + (i * 95) % (W - 80);
-      const y = ((i * 210 + t * 1.15) % (H + 80)) - 40;
-      ctx.fillStyle = `hsla(${hue - 20}, 35%, 18%, 0.75)`;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 48 + (i % 3) * 12, 14, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `hsla(${hue + 30}, 55%, 40%, 0.35)`;
-      ctx.beginPath();
-      ctx.ellipse(x, y - 6, 36 + (i % 3) * 8, 8, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  private drawChaosBg(ctx: CanvasRenderingContext2D, t: number, hue: number, calm: boolean) {
-    const cx = W / 2;
-    const cy = H * 0.38;
-    const pulse = calm ? 1 : 1 + Math.sin(t * 0.08) * 0.06;
-
-    for (let ring = 0; ring < 4; ring++) {
-      const r = (70 + ring * 48) * pulse;
-      ctx.strokeStyle = `hsla(${(hue + ring * 25 + t) % 360}, 70%, 60%, ${0.18 - ring * 0.03})`;
-      ctx.lineWidth = 2 + ring;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, t * 0.02 * (ring % 2 ? 1 : -1), t * 0.02 * (ring % 2 ? 1 : -1) + Math.PI * 1.4);
-      ctx.stroke();
-    }
-
-    // Jagged debris
-    for (let i = 0; i < 16; i++) {
-      const ang = (i / 16) * Math.PI * 2 + t * 0.015;
-      const dist = 80 + (i % 5) * 55 + Math.sin(t * 0.05 + i) * 12;
-      const x = cx + Math.cos(ang) * dist;
-      const y = (cy + Math.sin(ang) * dist * 0.7 + t * (0.8 + (i % 3) * 0.3)) % (H + 60) - 30;
-      ctx.fillStyle = `hsla(${(hue + i * 18) % 360}, 65%, 45%, 0.35)`;
-      ctx.beginPath();
-      ctx.moveTo(x, y - 10);
-      ctx.lineTo(x + 8, y + 4);
-      ctx.lineTo(x - 2, y + 12);
-      ctx.lineTo(x - 10, y);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // Core glow
-    const core = ctx.createRadialGradient(cx, cy, 4, cx, cy, 120);
-    core.addColorStop(0, `hsla(${hue + 40}, 90%, 70%, 0.28)`);
-    core.addColorStop(0.4, `hsla(${hue}, 70%, 40%, 0.12)`);
-    core.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = core;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  private blob(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number) {
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
   }
 
   private drawWorld(ctx: CanvasRenderingContext2D) {
