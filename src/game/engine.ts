@@ -383,6 +383,8 @@ export class Shmup {
     boss: loadImage(bossUrl),
   };
 
+  private outlineCache = new Map<string, HTMLCanvasElement>();
+
   private lastSig = "";
   private onHud: (h: Hud) => void;
 
@@ -1735,7 +1737,7 @@ export class Shmup {
       if (!e.alive) continue;
       const img = e.kind === "turret" ? this.imgs.turret : e.kind === "swooper" ? this.imgs.swooper : this.imgs.drone;
       const h = e.kind === "turret" ? 78 : e.kind === "swooper" ? 58 : e.kind === "mite" ? 34 : 48;
-      this.blit(ctx, img, e.x, e.y, h, 0);
+      this.blit(ctx, img, e.x, e.y, h, 0, true);
       if (e.kind === "turret" && e.hp < e.max) {
         ctx.fillStyle = "rgba(246,241,230,0.25)";
         ctx.fillRect(e.x - 18, e.y - 40, 36, 3);
@@ -1837,13 +1839,58 @@ export class Shmup {
     return { img: this.imgs.turret, h: 172 };
   }
 
-  private blit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, height: number, rot: number) {
+  private blit(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    x: number,
+    y: number,
+    height: number,
+    rot: number,
+    outline = false,
+  ) {
     if (!img.complete || !img.naturalWidth) return;
     const w = height * (img.naturalWidth / img.naturalHeight);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
-    ctx.drawImage(img, -w / 2, -height / 2, w, height);
+    if (outline) {
+      const framed = this.framed(img, w, height);
+      ctx.drawImage(framed, -framed.width / 2, -framed.height / 2);
+    } else {
+      ctx.drawImage(img, -w / 2, -height / 2, w, height);
+    }
     ctx.restore();
+  }
+
+  private framed(img: HTMLImageElement, w: number, height: number) {
+    const key = `${img.src}|${Math.round(w * 10)}|${Math.round(height * 10)}`;
+    const cached = this.outlineCache.get(key);
+    if (cached) return cached;
+    const pad = 1;
+    const cw = Math.ceil(w + pad * 2);
+    const ch = Math.ceil(height + pad * 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = cw;
+    canvas.height = ch;
+    const c = canvas.getContext("2d");
+    if (!c) return canvas;
+    const dirs: Array<[number, number]> = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [1, 1],
+      [1, -1],
+      [-1, 1],
+      [-1, -1],
+    ];
+    for (const [dx, dy] of dirs) c.drawImage(img, pad + dx, pad + dy, w, height);
+    c.globalCompositeOperation = "source-in";
+    c.fillStyle = "#f6e6c4";
+    c.fillRect(0, 0, cw, ch);
+    c.globalCompositeOperation = "source-over";
+    c.drawImage(img, pad, pad, w, height);
+    this.outlineCache.set(key, canvas);
+    return canvas;
   }
 }
