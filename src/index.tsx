@@ -138,7 +138,7 @@ export function Home() {
                   계속
                 </button>
                 <button type="button" className="ghost" onClick={() => gameRef.current?.backToTitle()}>
-                  표지
+                  처음으로
                 </button>
               </div>
             </div>
