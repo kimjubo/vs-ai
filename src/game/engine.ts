@@ -265,11 +265,28 @@ function makeStages(): StageDef[] {
       }),
     },
   ];
-  return raw.map((st) => ({
-    ...st,
-    bossAt: st.bossAt * 2,
-    waves: [...st.waves, ...st.waves.map((w) => ({ ...w, t: w.t + st.bossAt }))],
-  }));
+  return raw.map((st) => {
+    const waves = densify(st.waves);
+    return {
+      ...st,
+      bossAt: st.bossAt * 2,
+      waves: [...waves, ...waves.map((w) => ({ ...w, t: w.t + st.bossAt }))],
+    };
+  });
+}
+
+function densify(waves: Spawn[]): Spawn[] {
+  const extra: Spawn[] = [];
+  waves.forEach((w, i) => {
+    if (i % 10 >= 3) return;
+    const edge = w.x < 0 || w.x > W;
+    extra.push({
+      ...w,
+      t: Math.round((w.t + 0.42) * 100) / 100,
+      x: edge ? w.x : clamp(w.x + (i % 2 ? 72 : -72), 48, W - 48),
+    });
+  });
+  return [...waves, ...extra];
 }
 
 const STAGES = makeStages();
@@ -1367,11 +1384,11 @@ export class Shmup {
     for (const b of this.eBullets) {
       if (!b.alive) continue;
       ctx.beginPath();
-      ctx.fillStyle = b.kind === 2 ? "rgba(228, 177, 90, 0.35)" : "rgba(180, 120, 255, 0.35)";
+      ctx.fillStyle = "rgba(255, 72, 18, 0.42)";
       ctx.arc(b.x, b.y, b.kind === 2 ? 8 : 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.fillStyle = b.kind === 2 ? "#fff4d4" : "#f3e9ff";
+      ctx.fillStyle = "#ff4d1c";
       ctx.arc(b.x, b.y, b.kind === 2 ? 3.2 : 2.4, 0, Math.PI * 2);
       ctx.fill();
     }
