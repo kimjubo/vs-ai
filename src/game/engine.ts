@@ -1376,7 +1376,7 @@ export class Shmup {
     const st = STAGES[this.stage];
     const hue = st.hue;
     const form = st.form;
-    const t = this.scroll;
+    const t = this.scroll * 0.5;
     const calm = this.reduceMotion;
 
     const sky = ctx.createLinearGradient(0, 0, 0, H);
