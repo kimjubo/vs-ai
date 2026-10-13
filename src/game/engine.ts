@@ -51,6 +51,7 @@ export const INITIAL_HUD: Hud = {
 
 const W = 540;
 const H = 960;
+const ENEMY_DELAY = 5;
 const BEST_KEY = "vsai.best.v1";
 const MUTE_KEY = "vsai.mute.v1";
 
@@ -838,11 +839,18 @@ export class Shmup {
     this.emit(false);
   }
 
+  /** Wave clock that keeps each pattern, but holds the first enemy until 5 seconds after the stage opens. */
+  private encounterTime(st: StageDef) {
+    const lead = st.waves[0]?.t ?? 0;
+    return this.time - ENEMY_DELAY + lead;
+  }
+
   private stageLabel() {
     const st = STAGES[this.stage];
+    const clock = this.encounterTime(st);
     this.sector = st.name;
     if (this.bannerT > 0) this.warn = this.banner;
-    else if (!this.boss && this.finale <= 0 && this.time >= st.bossAt - 1.7 && this.time < st.bossAt) {
+    else if (!this.boss && this.finale <= 0 && clock >= st.bossAt - 1.7 && clock < st.bossAt) {
       this.warn = `${st.boss} 접근`;
     } else if (!this.boss) this.warn = "";
   }
@@ -850,7 +858,8 @@ export class Shmup {
   private spawnDirector() {
     if (this.finale > 0) return;
     const st = STAGES[this.stage];
-    while (this.spawnCursor < st.waves.length && st.waves[this.spawnCursor].t <= this.time && !this.boss) {
+    const clock = this.encounterTime(st);
+    while (this.spawnCursor < st.waves.length && st.waves[this.spawnCursor].t <= clock && !this.boss) {
       this.spawn(st.waves[this.spawnCursor], this.spawnCursor);
       this.spawnCursor += 1;
     }
@@ -858,7 +867,7 @@ export class Shmup {
       this.gifted = true;
       this.drop(W / 2, -16, "power");
     }
-    if (!this.boss && this.time >= st.bossAt) this.spawnBoss();
+    if (!this.boss && clock >= st.bossAt) this.spawnBoss();
   }
 
   private spawn(s: Spawn, index: number) {
