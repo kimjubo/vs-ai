@@ -3,6 +3,7 @@ import droneUrl from "../../public/sprites/drone.png";
 import turretUrl from "../../public/sprites/turret.png";
 import swooperUrl from "../../public/sprites/swooper.png";
 import bossUrl from "../../public/sprites/boss.png";
+import musicUrl from "../../public/audio/metal.wav?url";
 
 /**
  * VS.AI — vertical shmup.
@@ -270,7 +271,7 @@ function makeStages(): StageDef[] {
     return {
       ...st,
       bossAt: st.bossAt * 2,
-      waves: [...waves, ...waves.map((w) => ({ ...w, t: w.t + st.bossAt }))],
+      waves: thicken([...waves, ...waves.map((w) => ({ ...w, t: w.t + st.bossAt }))]),
     };
   });
 }
@@ -287,6 +288,20 @@ function densify(waves: Spawn[]): Spawn[] {
     });
   });
   return [...waves, ...extra];
+}
+
+function thicken(waves: Spawn[]): Spawn[] {
+  const extra: Spawn[] = [];
+  for (let i = 0; i < waves.length; i += 5) {
+    const w = waves[i];
+    const edge = w.x < 0 || w.x > W;
+    extra.push({
+      ...w,
+      t: Math.round((w.t + (edge ? 0.55 : 0.22)) * 100) / 100,
+      x: edge ? w.x : clamp(w.x + (i % 2 ? 70 : -70), 48, W - 48),
+    });
+  }
+  return [...waves, ...extra].sort((a, b) => a.t - b.t || a.x - b.x);
 }
 
 const STAGES = makeStages();
@@ -327,6 +342,8 @@ export class Shmup {
   private sector = STAGES[0].name;
   private spawnCursor = 0;
   private droneDrops = 0;
+  private bombSlots = new Set<number>();
+  private shotFlip = 0;
 
   private player = { x: W / 2, y: H - 150 };
   private lastSpeed = 0;
@@ -353,8 +370,10 @@ export class Shmup {
   private muted = false;
   private audio: AudioContext | null = null;
   private master: GainNode | null = null;
-  private musicT = 0;
-  private musicStep = 0;
+  private musicBuf: AudioBuffer | null = null;
+  private musicSrc: AudioBufferSourceNode | null = null;
+  private musicBus: GainNode | null = null;
+  private musicLoading = false;
 
   private imgs = {
     player: loadImage(playerUrl),
@@ -452,7 +471,7 @@ export class Shmup {
     });
     this.pBullets = Array.from({ length: 96 }, bullet);
     this.eBullets = Array.from({ length: 360 }, bullet);
-    this.enemies = Array.from({ length: 40 }, () => ({
+    this.enemies = Array.from({ length: 56 }, () => ({
       alive: false, kind: "drone" as Kind, x: 0, y: 0, originX: 0, vx: 0, vy: 0,
       hp: 1, max: 1, r: 16, t: 0, fire: 0, phase: 0, score: 100, drop: "none" as const, shot: false,
     }));
@@ -556,6 +575,7 @@ export class Shmup {
     this.boss = null;
     this.warn = "";
     this.sector = STAGES[0].name;
+    this.rollBombs();
     this.player.x = W / 2;
     this.player.y = H - 170;
     this.lastSpeed = 0;
@@ -616,6 +636,40 @@ export class Shmup {
       this.master = master;
     }
     if (this.audio.state === "suspended") void this.audio.resume();
+    this.loadMusic();
+  }
+
+  private loadMusic() {
+    if (this.musicLoading || this.musicBuf || !this.audio) return;
+    this.musicLoading = true;
+    const ctx = this.audio;
+    fetch(musicUrl)
+      .then((res) => res.arrayBuffer())
+      .then((raw) => ctx.decodeAudioData(raw))
+      .then((buf) => {
+        this.musicBuf = buf;
+        this.syncMusic();
+      })
+      .catch(() => {
+        this.musicLoading = false;
+      });
+  }
+
+  private syncMusic() {
+    if (!this.audio || !this.master || !this.musicBuf) return;
+    if (!this.musicSrc) {
+      const bus = this.audio.createGain();
+      bus.gain.value = 0;
+      bus.connect(this.master);
+      this.musicBus = bus;
+      const src = this.audio.createBufferSource();
+      src.buffer = this.musicBuf;
+      src.loop = true;
+      src.connect(bus);
+      src.start();
+      this.musicSrc = src;
+    }
+    this.musicBus?.gain.setTargetAtTime(this.phase === "play" ? 0.85 : 0, this.audio.currentTime, 0.08);
   }
 
   private tone(freq: number, dur: number, type: OscillatorType, gain: number, slide = 0) {
@@ -662,17 +716,16 @@ export class Shmup {
     this.tone(from, 0.35, "sawtooth", 0.05, to - from);
   }
 
-  private music(dt: number) {
-    if (this.phase !== "play" || !this.audio) return;
-    this.musicT += dt;
-    const step = 0.17;
-    if (this.musicT < step) return;
-    this.musicT -= step;
-    const lead = [220, 261.6, 293.7, 329.6, 392, 329.6, 293.7, 261.6];
-    const n = lead[this.musicStep % lead.length];
-    this.tone(n, 0.14, "triangle", 0.035);
-    if (this.musicStep % 4 === 0) this.tone(n / 2, 0.28, "sine", 0.04);
-    this.musicStep += 1;
+  private rollBombs() {
+    const n = STAGES[this.stage].waves.length;
+    const bag = Array.from({ length: n }, (_, i) => i);
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const swap = bag[i];
+      bag[i] = bag[j];
+      bag[j] = swap;
+    }
+    this.bombSlots = new Set(bag.slice(0, Math.min(2, n)));
   }
 
   private frame = (now: number) => {
@@ -708,9 +761,8 @@ export class Shmup {
   private update(dt: number) {
     this.handlePresses();
     this.bombLock = Math.max(0, this.bombLock - dt);
+    this.syncMusic();
     if (this.phase !== "play") return;
-
-    this.music(dt);
     this.focus = this.focusHeld || this.held.has("ShiftLeft") || this.held.has("ShiftRight");
     if (this.bannerT > 0) this.bannerT -= dt;
 
@@ -763,6 +815,7 @@ export class Shmup {
         this.warn = "";
         this.sector = STAGES[this.stage].name;
         this.inv = Math.max(this.inv, 1.1);
+        this.rollBombs();
         this.emit(true);
       }
     } else {
@@ -798,7 +851,7 @@ export class Shmup {
     if (this.finale > 0) return;
     const st = STAGES[this.stage];
     while (this.spawnCursor < st.waves.length && st.waves[this.spawnCursor].t <= this.time && !this.boss) {
-      this.spawn(st.waves[this.spawnCursor]);
+      this.spawn(st.waves[this.spawnCursor], this.spawnCursor);
       this.spawnCursor += 1;
     }
     if (!this.gifted && this.time >= 1.4 && this.power < 2) {
@@ -808,10 +861,11 @@ export class Shmup {
     if (!this.boss && this.time >= st.bossAt) this.spawnBoss();
   }
 
-  private spawn(s: Spawn) {
+  private spawn(s: Spawn, index: number) {
     const e = this.enemies.find((x) => !x.alive);
     if (!e) return;
     const wantPower = this.power < 2;
+    const bomb = this.bombSlots.has(index);
     e.alive = true;
     e.kind = s.kind;
     e.x = s.x;
@@ -828,22 +882,22 @@ export class Shmup {
       e.r = 16;
       e.score = 200;
       this.droneDrops += 1;
-      e.drop = wantPower && this.droneDrops % 3 === 0 ? "power" : "none";
+      e.drop = bomb ? "bomb" : wantPower && this.droneDrops % 3 === 0 ? "power" : "none";
     } else if (s.kind === "mite") {
       e.hp = e.max = 1;
       e.r = 11;
       e.score = 120;
-      e.drop = "none";
+      e.drop = bomb ? "bomb" : "none";
     } else if (s.kind === "swooper") {
       e.hp = e.max = 3;
       e.r = 18;
       e.score = 450;
-      e.drop = s.dir > 0 ? (wantPower ? "power" : "bomb") : "none";
+      e.drop = bomb ? "bomb" : wantPower && s.dir > 0 ? "power" : "none";
     } else {
       e.hp = e.max = 16;
       e.r = 26;
       e.score = 900;
-      e.drop = wantPower ? "power" : "bomb";
+      e.drop = bomb ? "bomb" : wantPower ? "power" : "none";
     }
   }
 
@@ -854,8 +908,8 @@ export class Shmup {
       alive: true,
       x: W / 2,
       y: -160,
-      hp: st.hp,
-      max: st.hp,
+      hp: Math.round(st.hp * 1.6),
+      max: Math.round(st.hp * 1.6),
       t: 0,
       fire: 0.9,
       hit: 0,
@@ -886,7 +940,8 @@ export class Shmup {
       for (const s of patterns[tier]) {
         this.spawnBullet(this.pBullets, this.player.x + s.x, this.player.y - 28, s.vx, -980, 5, 0);
       }
-      if (this.musicStep % 2 === 0) this.blip(920, 0.03, 0.012);
+      this.shotFlip ^= 1;
+      if (this.shotFlip === 0) this.blip(920, 0.03, 0.012);
       this.burst(this.player.x, this.player.y + 18, 1, "#3ee0ff", 40);
     }
     if (tier >= 2 && this.missileCd <= 0) {

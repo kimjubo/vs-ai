@@ -16,7 +16,10 @@ export default defineConfig({
   build: {
     outDir: "docs",
     emptyOutDir: true,
-    assetsInlineLimit: 8_000_000,
+    assetsInlineLimit: (filePath, content) => {
+      if (filePath.endsWith(".wav")) return false;
+      return content.length < 8_000_000;
+    },
     rollupOptions: {
       input: fileURLToPath(new URL("./pages.html", import.meta.url)),
     },
