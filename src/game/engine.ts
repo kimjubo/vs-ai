@@ -1722,11 +1722,11 @@ export class Shmup {
     for (const b of this.eBullets) {
       if (!b.alive) continue;
       ctx.beginPath();
-      ctx.fillStyle = "rgba(255, 72, 18, 0.42)";
+      ctx.fillStyle = "rgba(255, 72, 18, 0.84)";
       ctx.arc(b.x, b.y, b.kind === 2 ? 8 : 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.fillStyle = "#ff4d1c";
+      ctx.fillStyle = "#ffb14a";
       ctx.arc(b.x, b.y, b.kind === 2 ? 3.2 : 2.4, 0, Math.PI * 2);
       ctx.fill();
     }
