@@ -51,6 +51,7 @@ export const INITIAL_HUD: Hud = {
 
 const W = 540;
 const H = 960;
+const HIT_FLASH = 0.08;
 const BEST_KEY = "vsai.best.v1";
 const MUTE_KEY = "vsai.mute.v1";
 
@@ -99,6 +100,7 @@ type Enemy = {
   score: number;
   drop: "power" | "bomb" | "none";
   shot: boolean;
+  hit: number;
 };
 
 type Boss = {
@@ -383,6 +385,8 @@ export class Shmup {
     boss: loadImage(bossUrl),
   };
 
+  private whiteMasks = new WeakMap<HTMLImageElement, HTMLCanvasElement>();
+
   private lastSig = "";
   private onHud: (h: Hud) => void;
 
@@ -473,7 +477,7 @@ export class Shmup {
     this.eBullets = Array.from({ length: 360 }, bullet);
     this.enemies = Array.from({ length: 56 }, () => ({
       alive: false, kind: "drone" as Kind, x: 0, y: 0, originX: 0, vx: 0, vy: 0,
-      hp: 1, max: 1, r: 16, t: 0, fire: 0, phase: 0, score: 100, drop: "none" as const, shot: false,
+      hp: 1, max: 1, r: 16, t: 0, fire: 0, phase: 0, score: 100, drop: "none" as const, shot: false, hit: 0,
     }));
     this.parts = Array.from({ length: 220 }, () => ({
       alive: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, size: 2, color: "#fff",
@@ -615,6 +619,7 @@ export class Shmup {
       if (!e.alive) continue;
       e.hp -= 8;
       if (e.hp <= 0) this.killEnemy(e);
+      else e.hit = HIT_FLASH;
     }
     if (this.boss?.alive) {
       this.boss.hp = Math.max(0, this.boss.hp - 70);
@@ -875,6 +880,7 @@ export class Shmup {
     e.fire = 0.8;
     e.phase = s.t;
     e.shot = false;
+    e.hit = 0;
     e.vx = s.kind === "swooper" ? s.dir * 210 : 0;
     e.vy = s.kind === "mite" ? 360 : s.kind === "drone" ? 155 : 0;
     if (s.kind === "drone") {
@@ -980,6 +986,7 @@ export class Shmup {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       e.t += dt;
+      if (e.hit > 0) e.hit = Math.max(0, e.hit - dt);
       if (e.kind === "drone") {
         e.y += e.vy * dt;
         e.x = e.originX + Math.sin(e.t * 2.4 + e.phase) * 36;
@@ -1180,8 +1187,8 @@ export class Shmup {
         if (dx * dx + dy * dy < (b.r + e.r) * (b.r + e.r)) {
           b.alive = false;
           e.hp -= dmg;
-          this.burst(b.x, b.y, 3, b.homing ? "#e4b15a" : "#3ee0ff", 120);
           if (e.hp <= 0) this.killEnemy(e);
+          else e.hit = HIT_FLASH;
           break;
         }
       }
@@ -1192,7 +1199,7 @@ export class Shmup {
         if (dx * dx + dy * dy < boss.hitR * boss.hitR) {
           b.alive = false;
           boss.hp -= dmg;
-          boss.hit = 0.06;
+          boss.hit = HIT_FLASH;
           if (boss.hp <= 0) this.defeatBoss();
         }
       }
@@ -1735,7 +1742,7 @@ export class Shmup {
       if (!e.alive) continue;
       const img = e.kind === "turret" ? this.imgs.turret : e.kind === "swooper" ? this.imgs.swooper : this.imgs.drone;
       const h = e.kind === "turret" ? 78 : e.kind === "swooper" ? 58 : e.kind === "mite" ? 34 : 48;
-      this.blit(ctx, img, e.x, e.y, h, 0);
+      this.blit(ctx, img, e.x, e.y, h, 0, e.hit > 0);
       if (e.kind === "turret" && e.hp < e.max) {
         ctx.fillStyle = "rgba(246,241,230,0.25)";
         ctx.fillRect(e.x - 18, e.y - 40, 36, 3);
@@ -1747,21 +1754,14 @@ export class Shmup {
     if (this.boss && (this.boss.alive || this.finale > 0)) {
       const b = this.boss;
       const look = this.bossLook(b.form);
-      const flicker = b.hit > 0 ? 0.45 : 0;
       ctx.save();
       ctx.globalAlpha = this.finale > 0 ? clamp(this.finale / 2.3, 0, 1) : 1;
-      this.blit(ctx, look.img, b.x, b.y, look.h, 0);
+      this.blit(ctx, look.img, b.x, b.y, look.h, 0, b.hit > 0);
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = `rgba(62, 224, 255, ${0.55 + Math.sin(b.t * 8) * 0.2})`;
       ctx.beginPath();
       ctx.arc(b.x, b.y - 6, b.form === 5 ? 16 : 10, 0, Math.PI * 2);
       ctx.fill();
-      if (flicker) {
-        ctx.fillStyle = `rgba(246,241,230,${flicker})`;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.form === 5 ? 70 : 40, 0, Math.PI * 2);
-        ctx.fill();
-      }
       ctx.restore();
     }
 
@@ -1837,13 +1837,45 @@ export class Shmup {
     return { img: this.imgs.turret, h: 172 };
   }
 
-  private blit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, height: number, rot: number) {
+  private whiteMask(img: HTMLImageElement) {
+    const cached = this.whiteMasks.get(img);
+    if (cached) return cached;
+    const mask = document.createElement("canvas");
+    mask.width = img.naturalWidth;
+    mask.height = img.naturalHeight;
+    const g = mask.getContext("2d");
+    if (!g) return null;
+    g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = "#ffffff";
+    g.fillRect(0, 0, mask.width, mask.height);
+    this.whiteMasks.set(img, mask);
+    return mask;
+  }
+
+  private blit(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    x: number,
+    y: number,
+    height: number,
+    rot: number,
+    flash = false,
+  ) {
     if (!img.complete || !img.naturalWidth) return;
     const w = height * (img.naturalWidth / img.naturalHeight);
+    const left = -w / 2;
+    const top = -height / 2;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
-    ctx.drawImage(img, -w / 2, -height / 2, w, height);
+    if (flash) {
+      const mask = this.whiteMask(img);
+      if (mask) ctx.drawImage(mask, left, top, w, height);
+      else ctx.drawImage(img, left, top, w, height);
+    } else {
+      ctx.drawImage(img, left, top, w, height);
+    }
     ctx.restore();
   }
 }
