@@ -90,7 +90,7 @@ export function Home() {
             </div>
             <div className="hud-actions">
               <button type="button" className="bomb-btn" onClick={() => gameRef.current?.tryBomb()}>
-                B
+                B(폭탄)
               </button>
               <button type="button" className="icon-btn" onClick={() => gameRef.current?.togglePause()} aria-label="일시 정지">
                 <Pause size={18} />
