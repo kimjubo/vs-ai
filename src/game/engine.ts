@@ -374,6 +374,7 @@ export class Shmup {
   private musicSrc: AudioBufferSourceNode | null = null;
   private musicBus: GainNode | null = null;
   private musicLoading = false;
+  private sfxNext = new Map<string, number>();
 
   private imgs = {
     player: loadImage(playerUrl),
@@ -584,7 +585,7 @@ export class Shmup {
     for (const e of this.enemies) e.alive = false;
     for (const p of this.parts) p.alive = false;
     for (const p of this.picks) p.alive = false;
-    this.blip(660, 0.08, 0.04);
+    this.launchSfx();
     this.emit(true);
   }
 
@@ -609,7 +610,7 @@ export class Shmup {
     this.bombLock = 0.4;
     this.flash = 0.45;
     this.shake = Math.max(this.shake, 12);
-    this.sweep(180, 40);
+    this.bombSfx();
     for (const b of this.eBullets) b.alive = false;
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -672,48 +673,150 @@ export class Shmup {
     this.musicBus?.gain.setTargetAtTime(this.phase === "play" ? 0.85 : 0, this.audio.currentTime, 0.08);
   }
 
-  private tone(freq: number, dur: number, type: OscillatorType, gain: number, slide = 0) {
-    if (!this.audio || !this.master || this.muted) return;
-    const t = this.audio.currentTime;
+  private allowSfx(name: string, gap: number) {
+    if (!this.audio) return false;
+    const now = this.audio.currentTime;
+    if (now < (this.sfxNext.get(name) ?? 0)) return false;
+    this.sfxNext.set(name, now + gap);
+    return true;
+  }
+
+  private tone(freq: number, dur: number, type: OscillatorType, gain: number, slide = 0, delay = 0) {
+    if (!this.audio || !this.master || this.muted || dur <= 0) return;
+    const t = this.audio.currentTime + delay;
     const osc = this.audio.createOscillator();
     const g = this.audio.createGain();
+    const start = Math.max(40, freq);
+    const end = Math.max(40, freq + slide);
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, t);
-    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
-    g.gain.setValueAtTime(gain, t);
+    osc.frequency.setValueAtTime(start, t);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(end, t + dur);
+    const attack = Math.min(0.012, dur * 0.3);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(g);
     g.connect(this.master);
     osc.start(t);
-    osc.stop(t + dur + 0.02);
+    osc.stop(t + dur + 0.03);
   }
 
-  private noise(dur: number, gain: number) {
-    if (!this.audio || !this.master || this.muted) return;
-    const t = this.audio.currentTime;
-    const frames = Math.floor(this.audio.sampleRate * dur);
+  private noise(
+    dur: number,
+    gain: number,
+    from = 1400,
+    to = from,
+    type: BiquadFilterType = "lowpass",
+    delay = 0,
+  ) {
+    if (!this.audio || !this.master || this.muted || dur <= 0) return;
+    const t0 = this.audio.currentTime + delay;
+    const frames = Math.max(1, Math.floor(this.audio.sampleRate * dur));
     const buf = this.audio.createBuffer(1, frames, this.audio.sampleRate);
     const data = buf.getChannelData(0);
-    for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
     const src = this.audio.createBufferSource();
     src.buffer = buf;
     const filter = this.audio.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 900;
+    filter.type = type;
+    filter.Q.value = type === "bandpass" ? 5 : 0.7;
+    filter.frequency.setValueAtTime(Math.max(60, from), t0);
+    if (to !== from) filter.frequency.exponentialRampToValueAtTime(Math.max(60, to), t0 + dur);
     const g = this.audio.createGain();
-    g.gain.value = gain;
+    const attack = Math.min(0.012, dur * 0.25);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(filter);
     filter.connect(g);
     g.connect(this.master);
-    src.start(t);
+    src.start(t0);
+    src.stop(t0 + dur + 0.03);
   }
 
-  private blip(freq: number, dur: number, gain: number) {
-    this.tone(freq, dur, "square", gain);
+  /** Rapid laser. Two pitches alternate so a stream has a pulse instead of one flat beep. */
+  private shotSfx() {
+    const high = this.shotFlip === 0;
+    this.noise(0.04, 0.04, high ? 2600 : 1900, high ? 900 : 640, "bandpass");
+    this.tone(high ? 1560 : 1240, 0.035, "square", 0.014, high ? -760 : -560);
   }
 
-  private sweep(from: number, to: number) {
-    this.tone(from, 0.35, "sawtooth", 0.05, to - from);
+  /** Homing missile: a short falling whoosh under the laser. */
+  private missileSfx() {
+    this.noise(0.16, 0.05, 1800, 260, "lowpass");
+    this.tone(340, 0.14, "triangle", 0.026, -230);
+  }
+
+  /** Bullet connect. Boss hits sit lower so they read as armor, not sparks. */
+  private hitSfx(heavy = false) {
+    if (!this.allowSfx("hit", heavy ? 0.05 : 0.03)) return;
+    this.noise(heavy ? 0.045 : 0.025, heavy ? 0.05 : 0.03, heavy ? 700 : 2400, heavy ? 180 : 700, "highpass");
+    this.tone(heavy ? 160 : 720, heavy ? 0.05 : 0.02, "square", heavy ? 0.02 : 0.01, heavy ? -70 : -360);
+  }
+
+  private explodeSfx(size: "pop" | "mid" | "boss") {
+    if (size === "pop") {
+      this.noise(0.11, 0.065, 2400, 160);
+      this.tone(540, 0.09, "square", 0.028, -420);
+      return;
+    }
+    if (size === "mid") {
+      this.noise(0.2, 0.08, 1800, 110);
+      this.tone(220, 0.16, "sawtooth", 0.034, -150);
+      return;
+    }
+    this.noise(0.48, 0.11, 1500, 60);
+    this.noise(0.07, 0.07, 4200, 700, "highpass");
+    this.tone(150, 0.4, "sawtooth", 0.048, -100);
+    this.tone(84, 0.46, "triangle", 0.04, -40);
+  }
+
+  /** Screen-clearing bomb: a crack, then a long downward wash. */
+  private bombSfx() {
+    this.noise(0.08, 0.08, 5000, 900, "highpass");
+    this.noise(0.55, 0.1, 2800, 70);
+    this.tone(240, 0.42, "sawtooth", 0.05, -180);
+  }
+
+  private itemSfx(kind: "power" | "bomb") {
+    if (kind === "power") {
+      this.tone(659, 0.06, "square", 0.03);
+      this.tone(880, 0.06, "square", 0.028, 0, 0.055);
+      this.tone(1319, 0.12, "square", 0.026, 0, 0.11);
+      return;
+    }
+    this.tone(392, 0.07, "square", 0.03);
+    this.tone(523, 0.12, "triangle", 0.03, 0, 0.07);
+  }
+
+  private launchSfx() {
+    this.tone(523, 0.05, "square", 0.03);
+    this.tone(784, 0.08, "square", 0.028, 0, 0.05);
+    this.noise(0.09, 0.03, 2000, 500, "bandpass");
+  }
+
+  private winSfx() {
+    [523, 659, 784, 1047].forEach((freq, i) => this.tone(freq, 0.13, "square", 0.032, 0, i * 0.08));
+  }
+
+  /** Boss entrance: a low rumble and a two-note warning, not a single thud. */
+  private bossSfx() {
+    this.noise(0.4, 0.07, 220, 70);
+    this.tone(110, 0.14, "sawtooth", 0.04);
+    this.tone(147, 0.16, "square", 0.034, 0, 0.15);
+    this.tone(98, 0.24, "sawtooth", 0.038, -36, 0.32);
+  }
+
+  private hurtSfx(dead: boolean) {
+    this.noise(dead ? 0.42 : 0.15, dead ? 0.09 : 0.065, 2200, 90);
+    this.tone(dead ? 260 : 380, dead ? 0.36 : 0.15, "sawtooth", 0.044, dead ? -200 : -220);
+    if (dead) this.tone(130, 0.4, "square", 0.03, -70, 0.06);
+  }
+
+  /** Quiet high tick. Grazes happen constantly, so this stays short and sparse. */
+  private grazeSfx() {
+    if (!this.allowSfx("graze", 0.08)) return;
+    this.tone(1860, 0.025, "sine", 0.011, 240);
   }
 
   private rollBombs() {
@@ -797,7 +900,7 @@ export class Shmup {
       if (this.finale <= 0) {
         this.phase = "win";
         this.commitScore();
-        this.blip(523, 0.18, 0.05);
+        this.winSfx();
         this.emit(true);
         return;
       }
@@ -920,7 +1023,7 @@ export class Shmup {
     };
     this.warn = "";
     this.shake = Math.max(this.shake, 8);
-    this.noise(0.25, 0.08);
+    this.bossSfx();
     this.emit(true);
   }
 
@@ -941,14 +1044,14 @@ export class Shmup {
         this.spawnBullet(this.pBullets, this.player.x + s.x, this.player.y - 28, s.vx, -980, 5, 0);
       }
       this.shotFlip ^= 1;
-      if (this.shotFlip === 0) this.blip(920, 0.03, 0.012);
+      this.shotSfx();
       this.burst(this.player.x, this.player.y + 18, 1, "#3ee0ff", 40);
     }
     if (tier >= 2 && this.missileCd <= 0) {
       this.missileCd = 0.48;
       this.spawnBullet(this.pBullets, this.player.x - 18, this.player.y - 6, -70, -540, 6, 0, true);
       this.spawnBullet(this.pBullets, this.player.x + 18, this.player.y - 6, 70, -540, 6, 0, true);
-      this.blip(420, 0.05, 0.02);
+      this.missileSfx();
     }
   }
 
@@ -1150,7 +1253,7 @@ export class Shmup {
           this.bannerT = 1.25;
           this.warn = this.banner;
         } else this.bombs = Math.min(6, this.bombs + 1);
-        this.blip(p.kind === "power" ? 740 : 520, 0.08, 0.04);
+        this.itemSfx(p.kind);
         this.score += 50;
         this.emit(true);
       } else if (p.life <= 0 || p.y > H + 20) p.alive = false;
@@ -1181,6 +1284,7 @@ export class Shmup {
           b.alive = false;
           e.hp -= dmg;
           this.burst(b.x, b.y, 3, b.homing ? "#e4b15a" : "#3ee0ff", 120);
+          this.hitSfx(false);
           if (e.hp <= 0) this.killEnemy(e);
           break;
         }
@@ -1193,6 +1297,7 @@ export class Shmup {
           b.alive = false;
           boss.hp -= dmg;
           boss.hit = 0.06;
+          this.hitSfx(true);
           if (boss.hp <= 0) this.defeatBoss();
         }
       }
@@ -1231,6 +1336,7 @@ export class Shmup {
         b.grazed = true;
         this.score += 40;
         this.burst(b.x, b.y, 1, "#f6f1e6", 30);
+        this.grazeSfx();
       }
     }
   }
@@ -1243,7 +1349,7 @@ export class Shmup {
     const mult = Math.min(8, this.chain);
     this.score += e.score * mult;
     this.burst(e.x, e.y, e.kind === "turret" ? 16 : 8, "#e4b15a", 220);
-    this.noise(0.12, 0.05);
+    this.explodeSfx(e.kind === "mite" || e.kind === "drone" ? "pop" : "mid");
     if (e.drop !== "none") this.drop(e.x, e.y, e.drop);
   }
 
@@ -1266,7 +1372,7 @@ export class Shmup {
     this.flash = 0.5;
     this.burst(this.boss.x, this.boss.y, 36, "#3ee0ff", 360);
     this.burst(this.boss.x, this.boss.y, 20, "#e4b15a", 220);
-    this.noise(0.35, 0.09);
+    this.explodeSfx("boss");
     for (const b of this.eBullets) b.alive = false;
     for (const e of this.enemies) e.alive = false;
     if (this.stage >= 5) {
@@ -1285,7 +1391,7 @@ export class Shmup {
     this.inv = 2.3;
     this.shake = Math.max(this.shake, 11);
     this.flash = 0.25;
-    this.noise(0.18, 0.07);
+    this.hurtSfx(this.lives <= 0);
     this.burst(this.player.x, this.player.y, 18, "#f6f1e6", 260);
     for (const b of this.eBullets) {
       const dx = b.x - this.player.x;
