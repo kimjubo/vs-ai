@@ -11,7 +11,6 @@ export function Home() {
   const gameRef = useRef<Shmup | null>(null);
   const [hud, setHud] = useState<Hud>(INITIAL_HUD);
   const [muted, setMuted] = useState(false);
-  const [focusOn, setFocusOn] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -90,25 +89,6 @@ export function Home() {
               {hud.warn && <p className="warn">{hud.warn}</p>}
             </div>
             <div className="hud-actions">
-              <button
-                type="button"
-                className="focus-btn"
-                data-on={focusOn ? "true" : "false"}
-                onPointerDown={() => {
-                  setFocusOn(true);
-                  gameRef.current?.setFocusHeld(true);
-                }}
-                onPointerUp={() => {
-                  setFocusOn(false);
-                  gameRef.current?.setFocusHeld(false);
-                }}
-                onPointerLeave={() => {
-                  setFocusOn(false);
-                  gameRef.current?.setFocusHeld(false);
-                }}
-              >
-                정밀
-              </button>
               <button type="button" className="bomb-btn" onClick={() => gameRef.current?.tryBomb()}>
                 B
               </button>
