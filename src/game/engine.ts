@@ -51,6 +51,7 @@ export const INITIAL_HUD: Hud = {
 
 const W = 540;
 const H = 960;
+const BG_FADE = 1.2;
 const BEST_KEY = "vsai.best.v1";
 const MUTE_KEY = "vsai.mute.v1";
 
@@ -322,6 +323,10 @@ export class Shmup {
   private bombs = 3;
   private power = 0;
   private stage = 0;
+  private bgFade = 0;
+  private bgFrom = 0;
+  private bgCanvas: HTMLCanvasElement | null = null;
+  private bgCtx: CanvasRenderingContext2D | null = null;
   private clearing = 0;
   private missileCd = 0;
   private gifted = false;
@@ -559,6 +564,7 @@ export class Shmup {
     this.bombs = 3;
     this.power = 0;
     this.stage = 0;
+    this.bgFade = 0;
     this.clearing = 0;
     this.missileCd = 0;
     this.gifted = false;
@@ -763,6 +769,7 @@ export class Shmup {
     this.bombLock = Math.max(0, this.bombLock - dt);
     this.syncMusic();
     if (this.phase !== "play") return;
+    if (this.bgFade > 0) this.bgFade = Math.max(0, this.bgFade - dt);
     this.focus = this.focusHeld || this.held.has("ShiftLeft") || this.held.has("ShiftRight");
     if (this.bannerT > 0) this.bannerT -= dt;
 
@@ -807,6 +814,7 @@ export class Shmup {
       this.clearing -= dt;
       this.warn = "스테이지 돌파";
       if (this.clearing <= 0) {
+        this.beginBgFade(this.stage);
         this.stage += 1;
         this.time = 0;
         this.spawnCursor = 0;
@@ -1372,8 +1380,53 @@ export class Shmup {
     }
   }
 
-  private drawBackdrop(ctx: CanvasRenderingContext2D) {
-    const st = STAGES[this.stage];
+  private beginBgFade(from: number) {
+    if (this.reduceMotion) {
+      this.bgFade = 0;
+      return;
+    }
+    this.bgFrom = from;
+    this.bgFade = BG_FADE;
+  }
+
+  private ensureBgCanvas() {
+    if (this.bgCtx) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    this.bgCanvas = canvas;
+    this.bgCtx = canvas.getContext("2d");
+  }
+
+  private drawStageBackdrop(ctx: CanvasRenderingContext2D) {
+    const fading = this.bgFade > 0 && this.bgFrom !== this.stage;
+    if (!fading) {
+      this.drawBackdrop(ctx, this.stage);
+      return;
+    }
+    this.ensureBgCanvas();
+    const layer = this.bgCtx;
+    const bitmap = this.bgCanvas;
+    if (!layer || !bitmap) {
+      this.drawBackdrop(ctx, this.stage);
+      return;
+    }
+    const linear = 1 - this.bgFade / BG_FADE;
+    const next = linear * linear * (3 - 2 * linear);
+    layer.setTransform(1, 0, 0, 1, 0, 0);
+    layer.clearRect(0, 0, W, H);
+    this.drawBackdrop(layer, this.bgFrom);
+    ctx.drawImage(bitmap, 0, 0);
+    layer.clearRect(0, 0, W, H);
+    this.drawBackdrop(layer, this.stage);
+    ctx.save();
+    ctx.globalAlpha = next;
+    ctx.drawImage(bitmap, 0, 0);
+    ctx.restore();
+  }
+
+  private drawBackdrop(ctx: CanvasRenderingContext2D, stage = this.stage) {
+    const st = STAGES[stage];
     const hue = st.hue;
     const form = st.form;
     const t = this.scroll;
@@ -1682,7 +1735,7 @@ export class Shmup {
 
   private drawWorld(ctx: CanvasRenderingContext2D) {
     this.scroll += this.phase === "play" ? 1.4 : 0.35;
-    this.drawBackdrop(ctx);
+    this.drawStageBackdrop(ctx);
 
     const pulse = 1 + Math.sin(this.scroll * 0.35) * 0.08;
     for (const p of this.picks) {
