@@ -172,7 +172,7 @@ function makeStages(): StageDef[] {
     fill((t, kind, x, dir = 0) => list.push({ t, kind, x, dir }));
     return list;
   };
-  return [
+  const raw: StageDef[] = [
     {
       name: "데이터 사막",
       boss: "샌드 크롤러",
@@ -265,6 +265,11 @@ function makeStages(): StageDef[] {
       }),
     },
   ];
+  return raw.map((st) => ({
+    ...st,
+    bossAt: st.bossAt * 2,
+    waves: [...st.waves, ...st.waves.map((w) => ({ ...w, t: w.t + st.bossAt }))],
+  }));
 }
 
 const STAGES = makeStages();
@@ -914,9 +919,7 @@ export class Shmup {
         e.y += 36 * dt;
         if (!e.shot && e.x > 40 && e.x < W - 40) {
           e.shot = true;
-          for (const spread of [-0.35, 0, 0.35]) {
-            this.spawnBullet(this.eBullets, e.x, e.y, Math.sin(spread) * 160, 240, 5, 1);
-          }
+          this.aimVolley(e.x, e.y, 280, 3, 0.2, 5, 1);
         }
       } else if (e.y < 200) {
         e.y += 120 * dt;
@@ -925,9 +928,15 @@ export class Shmup {
         e.x = e.originX + Math.sin(e.t * 0.9) * 36;
         e.fire -= dt;
         if (e.fire <= 0) {
-          e.fire = 1.15;
-          const ang = Math.atan2(this.player.y - e.y, this.player.x - e.x);
-          this.spawnBullet(this.eBullets, e.x, e.y + 10, Math.cos(ang) * 250, Math.sin(ang) * 250, 5, 1);
+          e.fire = 1.05;
+          this.aimVolley(e.x, e.y + 10, 270, 3, 0.14, 5, 1);
+        }
+      }
+      if ((e.kind === "drone" || e.kind === "mite") && e.y > 30 && e.y < this.player.y - 40) {
+        e.fire -= dt;
+        if (e.fire <= 0) {
+          e.fire = e.kind === "mite" ? 1.25 : 1.45;
+          this.aimVolley(e.x, e.y, e.kind === "mite" ? 240 : 260, 1, 0, 5, 1);
         }
       }
       const gone = e.y > H + 70 || (e.kind === "swooper" && (e.x < -80 || e.x > W + 80) && e.t > 0.4);
@@ -956,57 +965,43 @@ export class Shmup {
     if (b.fire > 0) return;
 
     if (this.stage < 5) {
-      const aimed = Math.floor(b.t / 2.8) % 2 === 1;
-      if (!aimed) {
-        b.fire = this.stage < 2 ? 0.95 : 0.72;
-        const gap = b.t * 0.8;
-        const count = this.stage < 2 ? 12 : 16;
-        for (let i = 0; i < count; i++) {
-          const a = (i / count) * Math.PI * 2 + b.t * 0.2;
-          const diff = Math.atan2(Math.sin(a - gap), Math.cos(a - gap));
-          if (Math.abs(diff) < (this.stage < 2 ? 0.85 : 0.62)) continue;
-          const sp = 120 + this.stage * 8;
-          this.spawnBullet(this.eBullets, b.x, b.y, Math.cos(a) * sp, Math.sin(a) * sp, 5, 2);
-        }
-      } else {
-        b.fire = 0.55;
-        const ang = Math.atan2(this.player.y - b.y, this.player.x - b.x);
-        const n = this.stage < 2 ? 1 : 2;
-        for (let i = -n; i <= n; i++) {
-          const a = ang + i * 0.16;
-          this.spawnBullet(this.eBullets, b.x, b.y + 16, Math.cos(a) * 240, Math.sin(a) * 240, 5, 2);
-        }
-      }
+      const tight = Math.floor(b.t / 2.4) % 2 === 1;
+      b.fire = tight ? 0.5 : 0.78;
+      this.aimVolley(b.x, b.y + 16, 150 + this.stage * 16, tight ? 3 : 7, tight ? 0.12 : 0.16, 5, 2);
       return;
     }
 
     const speedMul = ratio < 0.33 ? 1.18 : 1;
     const mode = b.t < 3.2 ? 0 : Math.floor(b.t / 3.4) % 3;
     if (mode === 0) {
-      b.fire = ratio < 0.5 ? 0.62 : 0.85;
-      const gap = b.t * 0.9;
-      const count = 16;
-      for (let i = 0; i < count; i++) {
-        const a = (i / count) * Math.PI * 2 + b.t * 0.25;
-        const diff = Math.atan2(Math.sin(a - gap), Math.cos(a - gap));
-        if (Math.abs(diff) < 0.62) continue;
-        const sp = 145 * speedMul;
-        this.spawnBullet(this.eBullets, b.x, b.y, Math.cos(a) * sp, Math.sin(a) * sp, 6, 2);
-      }
+      b.fire = ratio < 0.5 ? 0.55 : 0.72;
+      this.aimVolley(b.x, b.y, 160 * speedMul, 9, 0.14, 6, 2);
     } else if (mode === 1) {
-      b.fire = 0.48;
-      const ang = Math.atan2(this.player.y - b.y, this.player.x - b.x);
-      for (let i = -1; i <= 1; i++) {
-        const a = ang + i * 0.16;
-        this.spawnBullet(this.eBullets, b.x, b.y + 20, Math.cos(a) * 270 * speedMul, Math.sin(a) * 270 * speedMul, 5, 2);
-      }
+      b.fire = 0.42;
+      this.aimVolley(b.x, b.y + 20, 280 * speedMul, 5, 0.1, 5, 2);
     } else {
-      b.fire = 0.26;
-      const gapX = W / 2 + Math.sin(b.t * 0.85) * 170;
-      for (let x = 36; x <= W - 36; x += 42) {
-        if (Math.abs(x - gapX) < 78) continue;
-        this.spawnBullet(this.eBullets, x, b.y + 36, Math.sin(b.t) * 20, 250 * speedMul, 5, 2);
+      b.fire = 0.28;
+      const gapX = this.player.x;
+      for (let x = 36; x <= W - 36; x += 48) {
+        if (Math.abs(x - gapX) < 70) continue;
+        this.aimVolley(x, b.y + 36, 250 * speedMul, 1, 0, 5, 2);
       }
+    }
+  }
+
+  private aimVolley(
+    x: number,
+    y: number,
+    speed: number,
+    count: number,
+    spread: number,
+    r: number,
+    kind: 1 | 2,
+  ) {
+    const base = Math.atan2(this.player.y - y, this.player.x - x);
+    for (let i = 0; i < count; i++) {
+      const a = base + (i - (count - 1) / 2) * spread;
+      this.spawnBullet(this.eBullets, x, y, Math.cos(a) * speed, Math.sin(a) * speed, r, kind);
     }
   }
 
@@ -1356,14 +1351,15 @@ export class Shmup {
         ctx.fillStyle = "#f4fdff";
         ctx.fillRect(-1.6, -7, 3.2, 11);
       } else {
-        ctx.fillStyle = "rgba(228,177,90,0.3)";
+        ctx.fillStyle = "#e4b15a";
         ctx.beginPath();
         ctx.arc(0, 0, 16, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "#e4b15a";
-        ctx.beginPath();
-        ctx.arc(0, 0, 7, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = "#1a1208";
+        ctx.font = "700 18px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("B", 0, 1);
       }
       ctx.restore();
     }

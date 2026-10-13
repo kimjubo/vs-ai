@@ -110,7 +110,7 @@ export function Home() {
                 정밀
               </button>
               <button type="button" className="bomb-btn" onClick={() => gameRef.current?.tryBomb()}>
-                폭탄
+                B
               </button>
               <button type="button" className="icon-btn" onClick={() => gameRef.current?.togglePause()} aria-label="일시 정지">
                 <Pause size={18} />
