@@ -1073,9 +1073,10 @@ export class Shmup {
     kind: 1 | 2,
   ) {
     const base = Math.atan2(this.player.y - y, this.player.x - x);
+    const pace = kind === 1 ? speed * 0.8 : speed;
     for (let i = 0; i < count; i++) {
       const a = base + (i - (count - 1) / 2) * spread;
-      this.spawnBullet(this.eBullets, x, y, Math.cos(a) * speed, Math.sin(a) * speed, r, kind);
+      this.spawnBullet(this.eBullets, x, y, Math.cos(a) * pace, Math.sin(a) * pace, r, kind);
     }
   }
 
