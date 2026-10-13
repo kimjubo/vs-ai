@@ -370,6 +370,7 @@ export class Shmup {
   private muted = false;
   private audio: AudioContext | null = null;
   private master: GainNode | null = null;
+  private sfx: GainNode | null = null;
   private musicBuf: AudioBuffer | null = null;
   private musicSrc: AudioBufferSourceNode | null = null;
   private musicBus: GainNode | null = null;
@@ -634,8 +635,12 @@ export class Shmup {
       const master = ctx.createGain();
       master.gain.value = this.muted ? 0 : 0.22;
       master.connect(ctx.destination);
+      const sfx = ctx.createGain();
+      sfx.gain.value = 1.5;
+      sfx.connect(master);
       this.audio = ctx;
       this.master = master;
+      this.sfx = sfx;
     }
     if (this.audio.state === "suspended") void this.audio.resume();
     this.loadMusic();
@@ -685,7 +690,7 @@ export class Shmup {
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfx ?? this.master);
     osc.start(t);
     osc.stop(t + dur + 0.02);
   }
@@ -706,7 +711,7 @@ export class Shmup {
     g.gain.value = gain;
     src.connect(filter);
     filter.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfx ?? this.master);
     src.start(t);
   }
 
